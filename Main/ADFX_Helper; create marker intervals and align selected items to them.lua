@@ -6,14 +6,34 @@
  * Repository URI: https://raw.githubusercontent.com/ADearing01/ADFXSound/master/index.xml
  * REAPER: 7.34
  * Extensions: SWS/S&M 2.14.0.3
- * Version: 1.0
+ * Version: 1.1
 --]]
-
 --[[
  * Changelog:
+ * v1.1 (2025-03-10)
+  + Added grid snapping for markers and items
  * v1.0 (2025-03-05)
   + Initial Release
 --]]
+
+function findNextDownbeat(position)
+  -- Get time signature 
+  local _, bpm, _, _ = reaper.TimeMap2_GetDividedBpmAtTime(0, position)
+  
+  -- Get measure information at position
+  local _, measures, cml, fullbeats, cdenom = reaper.TimeMap2_timeToBeats(0, position)
+  
+  -- If we're not on beat 1, find the next measure start
+  if fullbeats % cdenom ~= 0 then
+    -- Get the next measure start time
+    local next_measure = measures + 1
+    local next_downbeat_time = reaper.TimeMap2_beatsToTime(0, next_measure * cdenom, 0)
+    return next_downbeat_time
+  end
+  
+  -- Already on a downbeat (beat 1)
+  return position
+end
 
 function main()
   -- Store the initial edit cursor position to restore later
@@ -55,9 +75,11 @@ function main()
   -- Sort items by their original positions
   table.sort(items, function(a, b) return a.position < b.position end)
   
-  -- Fixed settings
-  local spacing = 1 -- 1 second spacing between items
-  local start_position = items[1].position -- Use first item's position
+  -- Get the time signature
+  local _, _, _, qn_per_measure = reaper.TimeMap_GetTimeSigAtTime(0, 0)
+  
+  -- Start the first item at the first downbeat from its current position
+  local start_position = findNextDownbeat(items[1].position)
   
   -- Position for the first item
   local current_pos = start_position
@@ -72,10 +94,14 @@ function main()
     if item_data.name ~= "" then
       marker_name = item_data.name -- Use item/take name if available
     end
-    reaper.AddProjectMarker(0, false, current_pos, 0, marker_name, -1)
     
-    -- Calculate the position for the next item (current position + this item's length + spacing)
-    current_pos = current_pos + item_data.length + spacing
+    -- Create marker at the exact same position
+    local marker_idx = reaper.AddProjectMarker(0, false, current_pos, 0, marker_name, -1)
+    
+    -- Calculate the position for the next item
+    -- Find the next downbeat after this item's end
+    local item_end = current_pos + item_data.length
+    current_pos = findNextDownbeat(item_end)
   end
   
   -- Update the display
@@ -85,7 +111,7 @@ function main()
   reaper.SetEditCurPos(initial_cursor_pos, false, false)
   
   -- End undo block
-  reaper.Undo_EndBlock("Align Items and Create Markers", -1)
+  reaper.Undo_EndBlock("Align Items to Downbeats and Create Markers", -1)
 end
 
 -- Execute the script
